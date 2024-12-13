@@ -1,12 +1,16 @@
 // pages/api/predict.js
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
-      return res.status(405).json({ error: 'Method not allowed' });
+      return res.status(405).json({ 
+        error: `Method ${req.method} Not Allowed. Only POST requests are accepted.` 
+      });
     }
   
     try {
-      console.log('Prediction request body:', req.body); // Debug log
+      // Log incoming request
+      console.log('Starting prediction with body:', req.body);
   
+      // Make the initial prediction request
       const response = await fetch("https://api.replicate.com/v1/predictions", {
         method: "POST",
         headers: {
@@ -20,29 +24,18 @@ export default async function handler(req, res) {
       });
   
       if (!response.ok) {
-        const errorText = await response.text(); // Get raw response text
-        console.error('Prediction API error response:', errorText); // Debug log
-        try {
-          const errorJson = JSON.parse(errorText);
-          throw new Error(errorJson.error || 'Prediction request failed');
-        } catch (e) {
-          throw new Error('Invalid response from prediction API');
-        }
+        const errorText = await response.text();
+        console.error('Prediction API error:', errorText);
+        return res.status(500).json({ error: 'Failed to start prediction' });
       }
   
-      let prediction;
-      try {
-        prediction = await response.json();
-        console.log("Initial prediction response:", prediction); // Debug log
-      } catch (e) {
-        console.error('Failed to parse initial response:', e);
-        throw new Error('Invalid JSON in prediction response');
-      }
+      const prediction = await response.json();
+      console.log("Initial prediction response:", prediction);
   
       // Poll for results
       let result = prediction;
       let attempts = 0;
-      const maxAttempts = 120; // 2 minutes timeout
+      const maxAttempts = 180; // 3 minutes timeout
   
       while (result.status !== "succeeded" && result.status !== "failed" && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -58,37 +51,33 @@ export default async function handler(req, res) {
         );
         
         if (!pollResponse.ok) {
-          const pollErrorText = await pollResponse.text();
-          console.error('Polling error response:', pollErrorText); // Debug log
-          throw new Error('Failed to poll for results');
+          console.error('Polling failed:', await pollResponse.text());
+          throw new Error('Failed to check prediction status');
         }
         
-        try {
-          result = await pollResponse.json();
-          console.log("Polling status:", result.status, "Attempt:", attempts); // Debug log
-        } catch (e) {
-          console.error('Failed to parse polling response:', e);
-          throw new Error('Invalid JSON in polling response');
-        }
+        result = await pollResponse.json();
+        console.log(`Polling attempt ${attempts}: ${result.status}`);
       }
   
       if (attempts >= maxAttempts) {
-        throw new Error('Generation timed out');
+        throw new Error('Generation timed out after 3 minutes');
       }
   
       if (result.status === "failed") {
-        throw new Error(result.error || "Generation failed");
+        console.error('Prediction failed:', result.error);
+        throw new Error(result.error || 'Generation failed');
       }
   
-      if (!result.output) {
-        throw new Error('No output received from generation');
+      if (!result.output || !Array.isArray(result.output)) {
+        console.error('Invalid output format:', result.output);
+        throw new Error('Invalid output format received');
       }
   
-      console.log("Final successful result:", result); // Debug log
+      console.log('Prediction completed successfully');
       res.status(200).json(result.output);
   
     } catch (error) {
-      console.error('Prediction error:', error);
-      res.status(500).json({ error: error.message || 'An unexpected error occurred' });
+      console.error('Prediction handler error:', error);
+      res.status(500).json({ error: error.message || 'Internal server error' });
     }
   }

@@ -1,5 +1,5 @@
 // pages/index.js
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import Head from 'next/head';
 import { Camera, Loader, RefreshCw, Download, Image } from 'lucide-react';
 
@@ -36,6 +36,8 @@ export default function Home() {
   const downloadImage = async (url, index) => {
     try {
       const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to download image');
+      
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -108,14 +110,15 @@ export default function Home() {
         body: JSON.stringify({ base64Image }),
       });
 
-      const uploadData = await uploadResponse.json();
       if (!uploadResponse.ok) {
-        throw new Error(uploadData.error || 'Failed to upload image');
+        const errorData = await uploadResponse.json();
+        throw new Error(errorData.error || 'Failed to upload image');
       }
 
+      const uploadData = await uploadResponse.json();
       const { imageUrl } = uploadData;
-      setGenerationStatus('Starting image generation...');
-      
+
+      setGenerationStatus('Generating images...');
       const predictionResponse = await fetch('/api/predict', {
         method: 'POST',
         headers: {
@@ -135,25 +138,25 @@ export default function Home() {
         }),
       });
 
-      const predictionData = await predictionResponse.json();
-
       if (!predictionResponse.ok) {
-        throw new Error(predictionData.error || 'Generation failed');
+        const errorData = await predictionResponse.json();
+        throw new Error(errorData.error || 'Generation failed');
       }
+
+      const predictionData = await predictionResponse.json();
 
       if (!Array.isArray(predictionData)) {
         throw new Error('Invalid response from generation API');
       }
 
       setResults(predictionData);
-      setGenerationStatus('');
 
     } catch (err) {
       console.error('Error:', err);
       setError(err.message || 'An unexpected error occurred');
-      setGenerationStatus('');
     } finally {
       setLoading(false);
+      setGenerationStatus('');
     }
   };
 
