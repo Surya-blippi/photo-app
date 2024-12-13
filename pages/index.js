@@ -1,7 +1,7 @@
 // pages/index.js
 import { useState, useCallback } from 'react';
 import Head from 'next/head';
-import { Camera, Loader, RefreshCw, Download } from 'lucide-react';
+import { Camera, Loader, RefreshCw, Download, Image } from 'lucide-react';
 
 const ASPECT_RATIOS = [
   { id: 'square', label: '1:1 Square', width: 1024, height: 1024 },
@@ -93,7 +93,6 @@ export default function Home() {
     setGenerationStatus('Uploading image...');
 
     try {
-      // Convert image to base64
       const base64Image = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result);
@@ -101,7 +100,6 @@ export default function Home() {
         reader.readAsDataURL(selectedImage);
       });
 
-      console.log('Starting upload...');
       const uploadResponse = await fetch('/api/upload', {
         method: 'POST',
         headers: {
@@ -116,9 +114,8 @@ export default function Home() {
       }
 
       const { imageUrl } = uploadData;
-      console.log('Upload successful:', imageUrl);
-
       setGenerationStatus('Starting image generation...');
+      
       const predictionResponse = await fetch('/api/predict', {
         method: 'POST',
         headers: {
@@ -139,14 +136,12 @@ export default function Home() {
       });
 
       const predictionData = await predictionResponse.json();
-      console.log('Prediction response:', predictionData);
 
       if (!predictionResponse.ok) {
         throw new Error(predictionData.error || 'Generation failed');
       }
 
       if (!Array.isArray(predictionData)) {
-        console.error('Unexpected response format:', predictionData);
         throw new Error('Invalid response from generation API');
       }
 
@@ -183,14 +178,25 @@ export default function Home() {
               </label>
               <div className="relative">
                 {!previewUrl ? (
-                  <button
-                    type="button"
-                    onClick={() => document.querySelector('input[type="file"]').click()}
-                    className="w-full h-64 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center space-y-2 bg-gray-50 hover:bg-gray-100 transition-colors"
-                  >
-                    <Camera className="w-10 h-10 text-gray-400" />
-                    <span className="text-sm text-gray-500">Tap to take a photo</span>
-                  </button>
+                  <div className="w-full space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => document.querySelector('#galleryInput').click()}
+                      className="w-full h-32 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center space-y-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+                    >
+                      <Image className="w-8 h-8 text-gray-400" />
+                      <span className="text-sm text-gray-500">Choose from Gallery</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => document.querySelector('#cameraInput').click()}
+                      className="w-full h-32 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center space-y-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+                    >
+                      <Camera className="w-8 h-8 text-gray-400" />
+                      <span className="text-sm text-gray-500">Take a Photo</span>
+                    </button>
+                  </div>
                 ) : (
                   <div className="relative">
                     <img
@@ -210,10 +216,20 @@ export default function Home() {
                     </button>
                   </div>
                 )}
+
+                {/* Hidden inputs */}
                 <input
+                  id="cameraInput"
                   type="file"
                   accept="image/*"
                   capture="user"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+                <input
+                  id="galleryInput"
+                  type="file"
+                  accept="image/*"
                   onChange={handleImageSelect}
                   className="hidden"
                 />
