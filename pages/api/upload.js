@@ -21,17 +21,19 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No image provided' });
     }
 
-    // Extract the base64 data
+    // Ensure proper base64 format
     const base64Data = base64Image.split(';base64,').pop();
     if (!base64Data) {
       return res.status(400).json({ error: 'Invalid image format' });
     }
 
+    // Generate a clean filename
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const filename = `upload_${timestamp}_${randomString}.jpg`;
+
     // Convert to buffer
     const buffer = Buffer.from(base64Data, 'base64');
-    
-    // Generate unique filename
-    const filename = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.jpg`;
 
     // Upload to Supabase
     const { data, error: uploadError } = await supabase.storage
@@ -47,12 +49,15 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Failed to upload to storage' });
     }
 
-    // Get public URL
+    // Get the public URL
     const { data: { publicUrl } } = supabase.storage
       .from('selfies')
       .getPublicUrl(filename);
 
-    return res.status(200).json({ imageUrl: publicUrl });
+    // Ensure URL is properly formatted
+    const finalUrl = new URL(publicUrl).toString();
+
+    return res.status(200).json({ imageUrl: finalUrl });
 
   } catch (error) {
     console.error('Upload handler error:', error);

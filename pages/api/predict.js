@@ -5,9 +5,11 @@ export default async function handler(req, res) {
     }
   
     try {
-      console.log('Making prediction request with input:', req.body);
-      
-      // Initial prediction request
+      const input = {
+        ...req.body,
+        main_face_image: new URL(req.body.main_face_image).toString() // Ensure valid URL
+      };
+  
       const response = await fetch("https://api.replicate.com/v1/predictions", {
         method: "POST",
         headers: {
@@ -16,26 +18,23 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           version: "8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b",
-          input: {
-            ...req.body,
-            output_format: "webp"  // Force webp format as it's known to work
-          },
+          input
         }),
       });
   
       if (!response.ok) {
         const errorData = await response.json();
         console.error('Prediction request failed:', errorData);
-        throw new Error(`Prediction request failed: ${errorData.error || response.statusText}`);
+        throw new Error(errorData.error || 'Prediction request failed');
       }
   
       const prediction = await response.json();
-      console.log("Initial prediction response:", prediction);
+      console.log("Initial prediction:", prediction);
   
       // Poll for results
       let result = prediction;
       let attempts = 0;
-      const maxAttempts = 120; // 2 minutes timeout
+      const maxAttempts = 120;
   
       while (result.status !== "succeeded" && result.status !== "failed" && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -51,36 +50,25 @@ export default async function handler(req, res) {
         );
         
         if (!pollResponse.ok) {
-          const errorData = await pollResponse.json();
-          console.error('Polling failed:', errorData);
-          throw new Error(`Polling failed: ${errorData.error || pollResponse.statusText}`);
+          throw new Error(`Polling failed: ${pollResponse.statusText}`);
         }
         
         result = await pollResponse.json();
-        console.log("Polling status:", result.status, "Attempt:", attempts);
-        
-        // Log detailed information if there's an error
-        if (result.error) {
-          console.error('Prediction error details:', result.error);
-        }
+        console.log("Polling status:", result.status);
       }
   
       if (result.status === "failed") {
-        console.error('Prediction failed:', result);
-        throw new Error(result.error || "Prediction failed - please try again");
-      }
-  
-      if (attempts >= maxAttempts) {
-        throw new Error("Prediction timed out - please try again");
+        throw new Error(result.error || "Prediction failed");
       }
   
       if (!result.output) {
-        console.error('No output in result:', result);
-        throw new Error("No output generated - please try again");
+        throw new Error("No output generated");
       }
   
-      console.log("Final successful result:", result);
-      res.status(200).json(result.output);
+      // Ensure all output URLs are valid
+      const validUrls = result.output.map(url => new URL(url).toString());
+      
+      res.status(200).json(validUrls);
     } catch (error) {
       console.error('Prediction error:', error);
       res.status(500).json({ error: error.message });
