@@ -1,114 +1,361 @@
-import Image from "next/image";
-import { Geist, Geist_Mono } from "next/font/google";
+// pages/index.js
+import { useState, useCallback } from 'react';
+import Head from 'next/head';
+import { Camera, Loader, RefreshCw, Download } from 'lucide-react';
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const ASPECT_RATIOS = [
+  { id: 'square', label: '1:1 Square', width: 1024, height: 1024 },
+  { id: 'portrait', label: '9:16 Portrait', width: 896, height: 1152 },
+  { id: 'landscape', label: '16:9 Landscape', width: 1152, height: 896 }
+];
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const CHARACTER_PRESETS = [
+  {
+    id: 'superwoman',
+    label: 'Superwoman',
+    prompt: "A strong curvy woman in Superwoman's iconic blue suit with the red \"S\" insignia glowing faintly, looking directly at the camera, her cape faintly fluttering in the wind, sunlight streaming behind her."
+  },
+  {
+    id: 'superman',
+    label: 'Superman',
+    prompt: "A strong man in Superman's iconic blue suit with the red \"S\" insignia glowing faintly, looking directly at the camera, his cape faintly fluttering in the wind, sunlight streaming behind him."
+  }
+];
 
 export default function Home() {
-  return (
-    <div
-      className={`${geistSans.variable} ${geistMono.variable} grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]`}
-    >
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              pages/index.js
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [generationStatus, setGenerationStatus] = useState('');
+  const [selectedRatio, setSelectedRatio] = useState(ASPECT_RATIOS[0]);
+  const [selectedCharacter, setSelectedCharacter] = useState(CHARACTER_PRESETS[0]);
+  const [downloading, setDownloading] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const downloadImage = async (url, index) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `generated-image-${index + 1}.webp`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download error:', error);
+      setError('Failed to download image');
+    }
+  };
+
+  const downloadAllImages = async () => {
+    try {
+      setDownloading(true);
+      setGenerationStatus('Downloading images...');
+      for (let i = 0; i < results.length; i++) {
+        await downloadImage(results[i], i);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (error) {
+      console.error('Download all error:', error);
+      setError('Failed to download all images');
+    } finally {
+      setDownloading(false);
+      setGenerationStatus('');
+    }
+  };
+
+  const handleImageSelect = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Image size should be less than 5MB');
+        return;
+      }
+      setSelectedImage(file);
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+      setResults([]);
+      setError(null);
+    }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!selectedImage) return;
+
+    setLoading(true);
+    setError(null);
+    setResults([]);
+    setGenerationStatus('Uploading image...');
+
+    try {
+      // Convert image to base64
+      const base64Image = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedImage);
+      });
+
+      console.log('Starting upload...');
+      const uploadResponse = await fetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ base64Image }),
+      });
+
+      const uploadData = await uploadResponse.json();
+      if (!uploadResponse.ok) {
+        throw new Error(uploadData.error || 'Failed to upload image');
+      }
+
+      const { imageUrl } = uploadData;
+      console.log('Upload successful:', imageUrl);
+
+      setGenerationStatus('Starting image generation...');
+      const predictionResponse = await fetch('/api/predict', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          main_face_image: imageUrl,
+          prompt: selectedCharacter.prompt,
+          negative_prompt: "bad quality, worst quality, text, signature, watermark, extra limbs",
+          num_outputs: 4,
+          width: selectedRatio.width,
+          height: selectedRatio.height,
+          start_step: 4,
+          guidance_scale: 4,
+          id_weight: 1,
+          num_steps: 20
+        }),
+      });
+
+      const predictionData = await predictionResponse.json();
+      console.log('Prediction response:', predictionData);
+
+      if (!predictionResponse.ok) {
+        throw new Error(predictionData.error || 'Generation failed');
+      }
+
+      if (!Array.isArray(predictionData)) {
+        console.error('Unexpected response format:', predictionData);
+        throw new Error('Invalid response from generation API');
+      }
+
+      setResults(predictionData);
+      setGenerationStatus('');
+
+    } catch (err) {
+      console.error('Error:', err);
+      setError(err.message || 'An unexpected error occurred');
+      setGenerationStatus('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <Head>
+        <title>AI Photo Generator</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </Head>
+
+      <main className="container mx-auto px-4 py-8">
+        <h1 className="text-3xl font-bold text-center mb-8">
+          AI Photo Generator
+        </h1>
+
+        <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Image Upload */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Upload your photo
+              </label>
+              <div className="relative">
+                {!previewUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => document.querySelector('input[type="file"]').click()}
+                    className="w-full h-64 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center space-y-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+                  >
+                    <Camera className="w-10 h-10 text-gray-400" />
+                    <span className="text-sm text-gray-500">Tap to take a photo</span>
+                  </button>
+                ) : (
+                  <div className="relative">
+                    <img
+                      src={previewUrl}
+                      alt="Preview"
+                      className="w-full h-64 object-cover rounded-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewUrl('');
+                        setSelectedImage(null);
+                      }}
+                      className="absolute top-2 right-2 bg-black bg-opacity-50 text-white p-2 rounded-full hover:bg-opacity-70"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="user"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+              </div>
+            </div>
+
+            {/* Aspect Ratio Selection */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Select Output Size
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {ASPECT_RATIOS.map((ratio) => (
+                  <button
+                    key={ratio.id}
+                    type="button"
+                    onClick={() => setSelectedRatio(ratio)}
+                    className={`p-2 text-sm rounded-lg border ${
+                      selectedRatio.id === ratio.id
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    {ratio.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Character Selection */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Select Character Style
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {CHARACTER_PRESETS.map((character) => (
+                  <button
+                    key={character.id}
+                    type="button"
+                    onClick={() => setSelectedCharacter(character)}
+                    className={`p-2 text-sm rounded-lg border ${
+                      selectedCharacter.id === character.id
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    {character.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Error Display */}
+            {error && (
+              <div className="p-4 bg-red-50 rounded-lg">
+                <p className="text-red-700">{error}</p>
+                <button
+                  type="button"
+                  onClick={() => setError(null)}
+                  className="mt-2 text-sm text-red-600 hover:text-red-800 flex items-center space-x-1"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Try again</span>
+                </button>
+              </div>
+            )}
+
+            {/* Generate Button */}
+            <button
+              type="submit"
+              disabled={!selectedImage || loading}
+              className={`w-full py-3 px-4 rounded-lg text-white font-medium flex items-center justify-center space-x-2 ${
+                !selectedImage || loading
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800'
+              } transition-colors`}
+            >
+              {loading && <Loader className="w-5 h-5 animate-spin" />}
+              <span>
+                {loading 
+                  ? generationStatus || 'Processing...'
+                  : 'Generate Photos'
+                }
+              </span>
+            </button>
+          </form>
+
+          {/* Results Display */}
+          {Array.isArray(results) && results.length > 0 && (
+            <div className="mt-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">Generated Photos</h2>
+                <button
+                  onClick={downloadAllImages}
+                  disabled={downloading}
+                  className={`text-sm flex items-center space-x-1 ${
+                    downloading 
+                      ? 'text-gray-400 cursor-not-allowed' 
+                      : 'text-blue-600 hover:text-blue-800'
+                  }`}
+                >
+                  {downloading ? (
+                    <Loader className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  <span>{downloading ? 'Downloading...' : 'Download All'}</span>
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {results.map((url, index) => (
+                  <div key={index} className="relative group">
+                    <img
+                      src={url}
+                      alt={`Generated ${index + 1}`}
+                      className="w-full rounded-lg"
+                      style={{
+                        aspectRatio: `${selectedRatio.width}/${selectedRatio.height}`
+                      }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black bg-opacity-40 rounded-lg">
+                      <button
+                        onClick={() => downloadImage(url, index)}
+                        className="px-3 py-2 bg-white text-gray-800 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors flex items-center space-x-1"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Download</span>
+                      </button>
+                    </div>
+                    <div className="absolute bottom-2 right-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-sm">
+                      {index + 1}/4
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm text-gray-500 text-center mt-2">
+                Hover over an image to download it individually
+              </p>
+            </div>
+          )}
         </div>
       </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
